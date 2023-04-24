@@ -2,7 +2,9 @@
 # In particular, we aim to replicate Fig. 4c (the optimized design) as well as the
 # returned optimal point. The implementation follows section 4 of the paper
 
-using JuMP, Gurobi, PhysicalDesignSparseQCQP
+using JuMP, Gurobi
+using PhysicalDesignSparseQCQP
+using UnicodePlots
 
 ## Define the problem
 
@@ -18,7 +20,13 @@ r_target = cis(reflected_phase)
 # PML
 
 # Simulation options
-N = design_domain * 20
+N = design_domain * 40
+
+m = 4
+d = 8
+R = 1e-6
+σmax = -(m+1)*log(R)/(2*d)
+pml = PML(d, σmax, m)
 
 model = NormalIncidenceFDFD1D(
     design_domain,
@@ -26,6 +34,16 @@ model = NormalIncidenceFDFD1D(
     N,
     pml
 )
+
+# quick model test
+Lχ1, Lχ2 = build_design_pdes(model)
+source = fill(0.0im, N + 2pml.N)
+source[pml.N+1] = 1.0 
+ψ1 = Lχ1 \ source
+ψ2 = Lχ2 \ source
+
+lineplot(real(ψ1))
+lineplot(real(ψ2))
 
 ## Define the QCQP
 # Eq. 39
@@ -55,10 +73,20 @@ model = NormalIncidenceFDFD1D(
 # (𝐋(χi)ψ - ξ)† 𝐃ᵢ(𝐋(χi)ψ - ξ) = 0 i ∈ I_PML
 # (𝐋(χi)ψ - ξ) = 0 i ∈ I_PML
 
-(;D, Lχ1, Lχ2, ξ) = build_component_constraints(model)
+(;D, Lχ1, Lχ2, ξ, Id, Ipml, Im) = build_component_constraints(model)
+N_T = size(D, 1)
 
+model = Model()
+@variable(model, ψ[1:N_T] in ComplexPlane())
+@constraint(model, (Lχ1*ψ - ξ)' * D[Id] * (Lχ2*ψ - ξ) == 0)
+@constraint(model, (Lχ1*ψ - ξ)' * D[Ipml] * (Lχ1*ψ - ξ) == 0)
+@constraint(model, (Lχ1*ψ - ξ)[Ipml, :] == 0)
+
+@objective(model, Max, real(LinearAlgebra.dot(r_target, ξ[Im])))
 
 # Interlude: attempt solve w/ Gurobi
+optimize!(model)
+solution_summary(model)
 
 # Define the SDP
 
