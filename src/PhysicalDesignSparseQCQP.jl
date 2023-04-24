@@ -1,6 +1,6 @@
 module PhysicalDesignSparseQCQP
 
-using SparseArrays
+using LinearAlgebra, SparseArrays
 
 export NormalIncidenceFDFD1D, PML, build_component_constraints, build_design_pdes
 
@@ -35,10 +35,13 @@ end
 Builds and returns the sparse matrices which correspond to the model, as used for optimization
 """
 function build_component_constraints(model)
-    Lχ1. Lχ2 = build_design_pdes(model)
-    D = build_design_indicator(model)
-    ξ = build_source_currents(model)
-    Id, Ipml, Im = select_constraint_indices(model)
+    Lχ1, Lχ2 = build_design_pdes(model)
+    D = I # this model is the trivial case
+    ξ = fill(0.0im, model.N + 2model.pml.N)
+    ξ[model.pml.N] = 1.0
+    Id = collect((model.pml.N+1):(model.pml.N+1+model.N))
+    Ipml = vcat(collect(1:model.pml.N), collect((model.pml.N+model.N+2):(model.N + 2model.pml.N)))
+    Im = [model.pml.N]
     return (; Lχ1, Lχ2, D, ξ, Id, Ipml, Im)
 end
 

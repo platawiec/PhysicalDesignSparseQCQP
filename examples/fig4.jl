@@ -74,7 +74,7 @@ lineplot(real(ψ2))
 # (𝐋(χi)ψ - ξ) = 0 i ∈ I_PML
 
 (;D, Lχ1, Lχ2, ξ, Id, Ipml, Im) = build_component_constraints(model)
-N_T = size(D, 1)
+N_T = size(Lχ1, 1)
 
 model = Model()
 @variable(model, ψ[1:N_T] in ComplexPlane())
