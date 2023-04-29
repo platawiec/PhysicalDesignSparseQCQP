@@ -3,7 +3,7 @@
 # returned optimal point. The implementation follows section 4 of the paper
 
 using PhysicalDesignSparseQCQP
-using JuMP, Ipopt
+using JuMP, Ipopt, COSMO
 using UnicodePlots
 using LinearAlgebra
 
@@ -106,6 +106,30 @@ Lχd = rebuild_design_pde(model, design_result)
 isapprox(Lχd \ ξ, ψ_result, rtol=1e-4)
 
 # Define the SDP
+m = Model(COSMO.Optimizer)
+# +1 for slack variable
+@variable(m, X[1:N_T+1, 1:N_T+1] in HermitianPSDCone())
 
+β = fill(0.0im, N_T)
+β[Im] .= r_target
+A0 = LinearAlgebra.Hermitian([fill(0.0im, N_T, N_T) β/2; β'/2 0.0im])
+@objective(m, Max, tr(LinearAlgebra.Hermitian(A0 * X)))
+
+Ai = map(1:N_T) do i
+    γi = ξ' * D[i] * ξ
+    # Lχ1 and Lχ2 have same values at Id and Ipml, don't need if/else
+    Bi = Lχ1' * D[i] * Lχ2
+    # TODO: check math, add other constraint
+    vi = Lχ1' * D[i] * ξ + Lχ2' * D[i] * ξ
+    return [Bi' vi/2; vi'/2 0.0im]
+end
+
+γi = map(1:N_T) do i
+    return ξ' * D[i] * ξ
+end
+@constraint(m, c_sdp[i=1:N_T], LinearAlgebra.tr(LinearAlgebra.Hermitian(Ai[i] * X)) == γi[i])
+
+optimize!(m)
+solution_summary(m)
 
 # Solve to optimal via majorization-minimization algorithm

@@ -39,7 +39,7 @@ function build_component_constraints(model)
     N_T = model.N + 2model.pml.N
     ξ = fill(0.0im, N_T)
     D = map(1:N_T) do i
-        Di = fill(0.0, N_T, N_T)
+        Di = spzeros(N_T, N_T)
         Di[i, i] = 1.0
         return Di
     end
