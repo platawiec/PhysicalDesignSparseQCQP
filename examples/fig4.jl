@@ -25,7 +25,7 @@ N = design_domain * 60
 
 m = 4
 d = 8
-R = 1e-6
+R = 1e-4
 σmax = -(m+1)*log(R)/(2*d)
 pml = PML(d, σmax, m)
 
@@ -83,7 +83,7 @@ m = Model(Ipopt.Optimizer)
 @constraint(m, cpml[i=Ipml], (Lχ1*ψ - ξ)' * D[i] * (Lχ1*ψ - ξ) .== 0)
 #@constraint(m, (Lχ1*ψ - ξ)[Ipml, :] .== 0)
 
-@objective(m, Max, real(LinearAlgebra.dot(r_target, ξ[Im])))
+@objective(m, Max, real(LinearAlgebra.dot(r_target, ψ[Im])))
 
 # Interlude: attempt solve w/ Ipopt
 optimize!(m)
@@ -98,9 +98,14 @@ design_result = derive_two_level_design((; Lχ1, Lχ2, D, ξ, Id, Ipml, Im), ψ_
 lineplot(design_result)
 lineplot(real(ψ_result .- ψ1))
 
-abs2.(ψ_result[Im])
-abs2.(ψ1[Im])
+abs2.(only(ψ_result[Im]))
+abs2.(only(ψ1[Im]))
+abs2.(only(ψ1[Im]) - only(ψ_result[Im]))
+
+Lχd = rebuild_design_pde(model, design_result)
+isapprox(Lχd \ ξ, ψ_result, rtol=1e-4)
 
 # Define the SDP
+
 
 # Solve to optimal via majorization-minimization algorithm

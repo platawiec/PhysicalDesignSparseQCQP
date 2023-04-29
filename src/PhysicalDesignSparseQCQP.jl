@@ -2,7 +2,7 @@ module PhysicalDesignSparseQCQP
 
 using LinearAlgebra, SparseArrays
 
-export NormalIncidenceFDFD1D, PML, build_component_constraints, build_design_pdes, derive_two_level_design
+export NormalIncidenceFDFD1D, PML, build_component_constraints, build_design_pdes, derive_two_level_design, rebuild_design_pde
 
 """
     NormalIncidenceFDFD1D
@@ -54,8 +54,10 @@ end
 function derive_two_level_design(design_params, ψ)
     (; Lχ1, Lχ2, D, ξ, Id, Ipml, Im) = design_params
     design = map(enumerate(D)) do (i, Di)
+        r1 = sum(abs, (Lχ1*ψ - ξ)' * Di)
+        r2 = sum(abs, (Lχ2*ψ - ξ)' * Di)
         if i in Id
-            if sum(abs, ((Lχ2*ψ - ξ)' * Di)) < sum(abs, ((Lχ1*ψ - ξ)' * Di))
+            if r2 < r1
                 return 1
             else
                 return 0
@@ -64,6 +66,29 @@ function derive_two_level_design(design_params, ψ)
         return 0
     end
     return design
+end
+
+function rebuild_design_pde(model, design_binary)
+    pml = model.pml
+    N_T = model.N + 2*pml.N
+    ω = 1.0
+    Δ = model.design_domain / (model.N-1)
+    mw = spdiagm(-1 => fill(1.0/Δ, N_T-1), 0 => fill(-2.0/Δ, N_T), 1 => fill(1.0/Δ, N_T-1))
+    χd = map(1:N_T) do i
+        if i < pml.N
+            return 1.0 - im * pml.σ_max * (pml.N - i)^(pml.m)
+        elseif i >= N_T - pml.N
+            return 1.0 - im * pml.σ_max * (i - N_T - pml.N)^(pml.m)
+        else
+            if design_binary[i] == 1
+                return complex(model.design_dielectric)
+            else
+                return complex(1.0)
+            end
+        end
+    end
+    Lχd = -mw - spdiagm(complex.(χd) * ω^2)
+    return Lχd
 end
 
 function build_design_pdes(model)
