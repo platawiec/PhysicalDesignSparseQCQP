@@ -2,9 +2,10 @@
 # In particular, we aim to replicate Fig. 4c (the optimized design) as well as the
 # returned optimal point. The implementation follows section 4 of the paper
 
-using JuMP, Gurobi
 using PhysicalDesignSparseQCQP
+using JuMP, Ipopt
 using UnicodePlots
+using LinearAlgebra
 
 ## Define the problem
 
@@ -20,7 +21,7 @@ r_target = cis(reflected_phase)
 # PML
 
 # Simulation options
-N = design_domain * 40
+N = design_domain * 60
 
 m = 4
 d = 8
@@ -76,17 +77,29 @@ lineplot(real(ψ2))
 (;D, Lχ1, Lχ2, ξ, Id, Ipml, Im) = build_component_constraints(model)
 N_T = size(Lχ1, 1)
 
-model = Model()
-@variable(model, ψ[1:N_T] in ComplexPlane())
-@constraint(model, (Lχ1*ψ - ξ)' * D[Id] * (Lχ2*ψ - ξ) == 0)
-@constraint(model, (Lχ1*ψ - ξ)' * D[Ipml] * (Lχ1*ψ - ξ) == 0)
-@constraint(model, (Lχ1*ψ - ξ)[Ipml, :] == 0)
+m = Model(Ipopt.Optimizer)
+@variable(m, ψ[1:N_T] in ComplexPlane())
+@constraint(m, c[i=Id], ((Lχ1*ψ - ξ)' * D[i] * (Lχ2*ψ - ξ)) == 0)
+@constraint(m, cpml[i=Ipml], (Lχ1*ψ - ξ)' * D[i] * (Lχ1*ψ - ξ) .== 0)
+#@constraint(m, (Lχ1*ψ - ξ)[Ipml, :] .== 0)
 
-@objective(model, Max, real(LinearAlgebra.dot(r_target, ξ[Im])))
+@objective(m, Max, real(LinearAlgebra.dot(r_target, ξ[Im])))
 
-# Interlude: attempt solve w/ Gurobi
-optimize!(model)
-solution_summary(model)
+# Interlude: attempt solve w/ Ipopt
+optimize!(m)
+solution_summary(m)
+
+ψ_result = value.(ψ)
+lineplot(real(ψ_result))
+
+design_result = derive_two_level_design((; Lχ1, Lχ2, D, ξ, Id, Ipml, Im), ψ_result)
+
+
+lineplot(design_result)
+lineplot(real(ψ_result .- ψ1))
+
+abs2.(ψ_result[Im])
+abs2.(ψ1[Im])
 
 # Define the SDP
 

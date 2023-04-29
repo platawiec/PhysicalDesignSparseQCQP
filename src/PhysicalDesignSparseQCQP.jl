@@ -2,7 +2,7 @@ module PhysicalDesignSparseQCQP
 
 using LinearAlgebra, SparseArrays
 
-export NormalIncidenceFDFD1D, PML, build_component_constraints, build_design_pdes
+export NormalIncidenceFDFD1D, PML, build_component_constraints, build_design_pdes, derive_two_level_design
 
 """
     NormalIncidenceFDFD1D
@@ -36,13 +36,34 @@ Builds and returns the sparse matrices which correspond to the model, as used fo
 """
 function build_component_constraints(model)
     Lχ1, Lχ2 = build_design_pdes(model)
-    D = I # this model is the trivial case
-    ξ = fill(0.0im, model.N + 2model.pml.N)
+    N_T = model.N + 2model.pml.N
+    ξ = fill(0.0im, N_T)
+    D = map(1:N_T) do i
+        Di = fill(0.0, N_T, N_T)
+        Di[i, i] = 1.0
+        return Di
+    end
+
     ξ[model.pml.N] = 1.0
     Id = collect((model.pml.N+1):(model.pml.N+1+model.N))
     Ipml = vcat(collect(1:model.pml.N), collect((model.pml.N+model.N+2):(model.N + 2model.pml.N)))
     Im = [model.pml.N]
     return (; Lχ1, Lχ2, D, ξ, Id, Ipml, Im)
+end
+
+function derive_two_level_design(design_params, ψ)
+    (; Lχ1, Lχ2, D, ξ, Id, Ipml, Im) = design_params
+    design = map(enumerate(D)) do (i, Di)
+        if i in Id
+            if sum(abs, ((Lχ2*ψ - ξ)' * Di)) < sum(abs, ((Lχ1*ψ - ξ)' * Di))
+                return 1
+            else
+                return 0
+            end
+        end
+        return 0
+    end
+    return design
 end
 
 function build_design_pdes(model)
