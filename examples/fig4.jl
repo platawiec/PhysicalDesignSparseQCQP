@@ -94,7 +94,6 @@ lineplot(real(ψ_result))
 
 design_result = derive_two_level_design((; Lχ1, Lχ2, D, ξ, Id, Ipml, Im), ψ_result)
 
-
 lineplot(design_result)
 lineplot(real(ψ_result .- ψ1))
 
@@ -115,21 +114,43 @@ m = Model(COSMO.Optimizer)
 A0 = LinearAlgebra.Hermitian([fill(0.0im, N_T, N_T) β/2; β'/2 0.0im])
 @objective(m, Max, tr(LinearAlgebra.Hermitian(A0 * X)))
 
-Ai = map(1:N_T) do i
+
+Ai_re = map(1:N_T) do i
     γi = ξ' * D[i] * ξ
     # Lχ1 and Lχ2 have same values at Id and Ipml, don't need if/else
     Bi = Lχ1' * D[i] * Lχ2
+    # ((Lχ1*ψ - ξ)' * D[i] * (Lχ2*ψ - ξ))
+    # = ψ' Lχ1' D[i] Lχ2 ψ - ψ' Lχ1' D[i] ξ - ξ' D[i] Lχ2 ψ + ξ' D[i] ξ
+    # = ψ' Bi ψ + Re(vi' ψ)
     # TODO: check math, add other constraint
-    vi = Lχ1' * D[i] * ξ + Lχ2' * D[i] * ξ
-    return [Bi' vi/2; vi'/2 0.0im]
+    vi = -Lχ2' * D[i] * ξ - Lχ1' * D[i] * ξ
+    return [Bi   vi/2; vi'/2 0.0im]
+end
+Ai_im = map(1:N_T) do i
+    # Lχ1 and Lχ2 have same values at Id and Ipml, don't need if/else
+    Bi = Lχ1' * im * D[i] * Lχ2 
+    # ((Lχ1*ψ - ξ)' * D[i] * (Lχ2*ψ - ξ))
+    # = ψ' Lχ1' D[i] Lχ2 ψ - ψ' Lχ1' D[i] ξ - ξ' D[i] Lχ2 ψ + ξ' D[i] ξ
+    # = ψ' Bi ψ + Re(vi' ψ)
+    # TODO: check math, add other constraint
+    vi = -Lχ2' * im * D[i] * ξ - Lχ1' * im * D[i] * ξ
+    return [Bi   vi/2; vi'/2 0.0im]
 end
 
 γi = map(1:N_T) do i
     return ξ' * D[i] * ξ
 end
-@constraint(m, c_sdp[i=1:N_T], LinearAlgebra.tr(LinearAlgebra.Hermitian(Ai[i] * X)) == γi[i])
+@constraint(m, c_sdp_re[i=1:N_T], LinearAlgebra.tr(LinearAlgebra.Hermitian(Ai_re[i] * X)) == γi[i])
+@constraint(m, c_sdp_im[i=1:N_T], LinearAlgebra.tr(LinearAlgebra.Hermitian(Ai_im[i] * X)) == 0.0)
 
 optimize!(m)
 solution_summary(m)
 
+ψ_result = svd(value.(X)).U[:, 1][1:end-1]
+lineplot(real(ψ_result))
+design_result = derive_two_level_design((; Lχ1, Lχ2, D, ξ, Id, Ipml, Im), ψ_result)
+
+lineplot(design_result)
+
 # Solve to optimal via majorization-minimization algorithm
+|
