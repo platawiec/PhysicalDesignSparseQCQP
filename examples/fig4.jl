@@ -5,7 +5,7 @@
 using PhysicalDesignSparseQCQP
 using JuMP, Ipopt, COSMO
 using UnicodePlots
-using LinearAlgebra
+using LinearAlgebra, SparseArrays
 
 ## Define the problem
 
@@ -21,7 +21,7 @@ r_target = cis(reflected_phase)
 # PML
 
 # Simulation options
-N = design_domain * 60
+N = design_domain * 20
 
 m = 4
 d = 8
@@ -114,21 +114,21 @@ m = Model(COSMO.Optimizer)
 A0 = LinearAlgebra.Hermitian([fill(0.0im, N_T, N_T) β/2; β'/2 0.0im])
 @objective(m, Max, tr(LinearAlgebra.Hermitian(A0 * X)))
 
-
 Ai_re = map(1:N_T) do i
     γi = ξ' * D[i] * ξ
     # Lχ1 and Lχ2 have same values at Id and Ipml, don't need if/else
-    Bi = Lχ1' * D[i] * Lχ2
+    Bi = real(Lχ1' * D[i] * Lχ2)
     # ((Lχ1*ψ - ξ)' * D[i] * (Lχ2*ψ - ξ))
     # = ψ' Lχ1' D[i] Lχ2 ψ - ψ' Lχ1' D[i] ξ - ξ' D[i] Lχ2 ψ + ξ' D[i] ξ
     # = ψ' Bi ψ + Re(vi' ψ)
+    # = (ψ s)' [Bi vi/2; vi'/2 0] (ψ s) = ψ' Bi ψ + ψ' vi/2 s + s' vi'/2 ψ = ψ' Bi ψ + Re(vi' ψ)
     # TODO: check math, add other constraint
     vi = -Lχ2' * D[i] * ξ - Lχ1' * D[i] * ξ
     return [Bi   vi/2; vi'/2 0.0im]
 end
 Ai_im = map(1:N_T) do i
     # Lχ1 and Lχ2 have same values at Id and Ipml, don't need if/else
-    Bi = Lχ1' * im * D[i] * Lχ2 
+    Bi = imag(Lχ1' * D[i] * Lχ2)
     # ((Lχ1*ψ - ξ)' * D[i] * (Lχ2*ψ - ξ))
     # = ψ' Lχ1' D[i] Lχ2 ψ - ψ' Lχ1' D[i] ξ - ξ' D[i] Lχ2 ψ + ξ' D[i] ξ
     # = ψ' Bi ψ + Re(vi' ψ)
@@ -136,13 +136,41 @@ Ai_im = map(1:N_T) do i
     vi = -Lχ2' * im * D[i] * ξ - Lχ1' * im * D[i] * ξ
     return [Bi   vi/2; vi'/2 0.0im]
 end
-
-γi = map(1:N_T) do i
-    return ξ' * D[i] * ξ
+Alin_re = map(Ipml) do i
+    u = spzeros(N_T)
+    u[i] = 1
+    return [spzeros(N_T, N_T) Lχ1' * u / 2; u' * Lχ1 / 2 0.0]
 end
-@constraint(m, c_sdp_re[i=1:N_T], LinearAlgebra.tr(LinearAlgebra.Hermitian(Ai_re[i] * X)) == γi[i])
-@constraint(m, c_sdp_im[i=1:N_T], LinearAlgebra.tr(LinearAlgebra.Hermitian(Ai_im[i] * X)) == 0.0)
+Alin_im = map(Ipml) do i
+    u = spzeros(ComplexF64, N_T)
+    u[i] = im
+    return [spzeros(N_T, N_T) Lχ1' * u / 2; u' * Lχ1 / 2 0.0]
+end
 
+γi_re = map(1:N_T) do i
+    return real(ξ' * D[i] * ξ)
+end
+γi_im = map(1:N_T) do i
+    return imag(ξ' * D[i] * ξ)
+end
+δi_re = map(Ipml) do i
+    u = spzeros(N_T)
+    u[i] = 1
+    return real(u' * ξ)
+end
+δi_im = map(Ipml) do i
+    u = spzeros(ComplexF64, N_T)
+    u[i] = im
+    return real(u' * ξ)
+end
+
+A_set = [Ai_re; Ai_im; Alin_re; Alin_im]
+a_set = [γi_re; γi_im; δi_re; δi_im]
+@constraint(m, c_set[i=1:length(A_set)], LinearAlgebra.tr(LinearAlgebra.Hermitian(A_set[i] * X)) == a_set[i])
+# slack variable magnitude == 1
+@constraint(m, X[end, end] == 1)
+
+set_optimizer_attribute(m, "max_iter", 20000)
 optimize!(m)
 solution_summary(m)
 
@@ -151,6 +179,11 @@ lineplot(real(ψ_result))
 design_result = derive_two_level_design((; Lχ1, Lχ2, D, ξ, Id, Ipml, Im), ψ_result)
 
 lineplot(design_result)
+Lχd = rebuild_design_pde(model, design_result)
+ψ_result = Lχd \ ξ
+lineplot(real(ψ_result))
 
+abs2.(only(ψ_result[Im]))
+abs2.(only(ψ1[Im]))
+abs2.(only(ψ1[Im]) - only(ψ_result[Im]))
 # Solve to optimal via majorization-minimization algorithm
-|
