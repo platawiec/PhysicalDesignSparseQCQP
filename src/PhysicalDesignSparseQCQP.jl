@@ -44,10 +44,10 @@ function build_component_constraints(model)
         return Di
     end
 
-    ξ[model.pml.N] = 1.0
+    ξ[model.pml.N+1] = 1.0
     Id = collect((model.pml.N+1):(model.pml.N+1+model.N))
     Ipml = vcat(collect(1:model.pml.N), collect((model.pml.N+model.N+2):(model.N + 2model.pml.N)))
-    Im = [model.pml.N]
+    Im = [N_T - model.pml.N - 1]
     return (; Lχ1, Lχ2, D, ξ, Id, Ipml, Im)
 end
 

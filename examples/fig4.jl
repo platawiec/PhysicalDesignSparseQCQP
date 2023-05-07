@@ -3,7 +3,7 @@
 # returned optimal point. The implementation follows section 4 of the paper
 
 using PhysicalDesignSparseQCQP
-using JuMP, Ipopt, COSMO
+using JuMP, Ipopt
 using UnicodePlots
 using LinearAlgebra, SparseArrays
 
@@ -21,11 +21,11 @@ r_target = cis(reflected_phase)
 # PML
 
 # Simulation options
-N = design_domain * 20
+N = design_domain * 40
 
 m = 4
-d = 8
-R = 1e-4
+d = 20
+R = 9e-1
 σmax = -(m+1)*log(R)/(2*d)
 pml = PML(d, σmax, m)
 
@@ -39,7 +39,7 @@ model = NormalIncidenceFDFD1D(
 # quick model test
 Lχ1, Lχ2 = build_design_pdes(model)
 source = fill(0.0im, N + 2pml.N)
-source[pml.N+1] = 1.0 
+source[pml.N+1] = 1 
 ψ1 = Lχ1 \ source
 ψ2 = Lχ2 \ source
 
@@ -83,7 +83,7 @@ m = Model(Ipopt.Optimizer)
 @constraint(m, cpml[i=Ipml], (Lχ1*ψ - ξ)' * D[i] * (Lχ1*ψ - ξ) .== 0)
 #@constraint(m, (Lχ1*ψ - ξ)[Ipml, :] .== 0)
 
-@objective(m, Max, real(LinearAlgebra.dot(r_target, ψ[Im])))
+@objective(m, Max, real(ψ[only(Im)]))
 
 # Interlude: attempt solve w/ Ipopt
 optimize!(m)
@@ -105,72 +105,104 @@ Lχd = rebuild_design_pde(model, design_result)
 isapprox(Lχd \ ξ, ψ_result, rtol=1e-4)
 
 # Define the SDP
-m = Model(COSMO.Optimizer)
-# +1 for slack variable
+# Tested:
+using COSMO
+m = Model(
+    COSMO.Optimizer,
+)
+set_attribute(m, "merge_strategy", COSMO.CliqueGraphMerge)
+set_attribute(m, "decompose", true)
+set_attribute(m, "time_limit", 60.0)
+# 
+# using Hypatia
+# m = Model(Hypatia.Optimizer)
+#
+# Segfault
+# using Clarabel
+# m = Model(Clarabel.Optimizer)
+#
+# Error
+# using CSDP
+# m = Model(CSDP.Optimizer)
+#
+# really weird StackOverflow
+# using ProxSDP
 @variable(m, X[1:N_T+1, 1:N_T+1] in HermitianPSDCone())
 
 β = fill(0.0im, N_T)
-β[Im] .= r_target
-A0 = LinearAlgebra.Hermitian([fill(0.0im, N_T, N_T) β/2; β'/2 0.0im])
-@objective(m, Max, tr(LinearAlgebra.Hermitian(A0 * X)))
+β[Im] .= 1.0#r_target
+A0 = Hermitian([fill(0.0im, N_T, N_T) β/2; β'/2 0.0im])
+@objective(m, Max, tr(Hermitian(A0 * X)))
 
+
+Ai = map(1:N_T) do i
+    Bi = Lχ1' * D[i] * Lχ2
+    vcol = -Lχ1' * D[i] * ξ
+    vrow = -ξ' * D[i] * Lχ2
+    return [Bi/2 vcol; vrow 0.0im]
+end
 Ai_re = map(1:N_T) do i
-    γi = ξ' * D[i] * ξ
     # Lχ1 and Lχ2 have same values at Id and Ipml, don't need if/else
-    Bi = real(Lχ1' * D[i] * Lχ2)
+    Bi = Lχ1' * D[i] * Lχ2 + (Lχ1' * D[i] * Lχ2)'
     # ((Lχ1*ψ - ξ)' * D[i] * (Lχ2*ψ - ξ))
     # = ψ' Lχ1' D[i] Lχ2 ψ - ψ' Lχ1' D[i] ξ - ξ' D[i] Lχ2 ψ + ξ' D[i] ξ
     # = ψ' Bi ψ + Re(vi' ψ)
     # = (ψ s)' [Bi vi/2; vi'/2 0] (ψ s) = ψ' Bi ψ + ψ' vi/2 s + s' vi'/2 ψ = ψ' Bi ψ + Re(vi' ψ)
     # TODO: check math, add other constraint
     vi = -Lχ2' * D[i] * ξ - Lχ1' * D[i] * ξ
-    return [Bi   vi/2; vi'/2 0.0im]
+    return [Bi/2   vi/2; vi'/2 0.0im]
 end
 Ai_im = map(1:N_T) do i
     # Lχ1 and Lχ2 have same values at Id and Ipml, don't need if/else
-    Bi = imag(Lχ1' * D[i] * Lχ2)
+    Bi = Lχ1' * im * D[i] * Lχ2 + (Lχ1' * im * D[i] * Lχ2)'
     # ((Lχ1*ψ - ξ)' * D[i] * (Lχ2*ψ - ξ))
     # = ψ' Lχ1' D[i] Lχ2 ψ - ψ' Lχ1' D[i] ξ - ξ' D[i] Lχ2 ψ + ξ' D[i] ξ
     # = ψ' Bi ψ + Re(vi' ψ)
     # TODO: check math, add other constraint
     vi = -Lχ2' * im * D[i] * ξ - Lχ1' * im * D[i] * ξ
-    return [Bi   vi/2; vi'/2 0.0im]
+    return [Bi/2   vi/2; vi'/2 0.0im]
 end
-Alin_re = map(Ipml) do i
+Alin = map(Ipml) do i
     u = spzeros(N_T)
     u[i] = 1
     return [spzeros(N_T, N_T) Lχ1' * u / 2; u' * Lχ1 / 2 0.0]
 end
-Alin_im = map(Ipml) do i
-    u = spzeros(ComplexF64, N_T)
-    u[i] = im
-    return [spzeros(N_T, N_T) Lχ1' * u / 2; u' * Lχ1 / 2 0.0]
-end
 
+γi = map(1:N_T) do i
+    return ξ' * D[i] * ξ
+end
 γi_re = map(1:N_T) do i
     return real(ξ' * D[i] * ξ)
 end
 γi_im = map(1:N_T) do i
-    return imag(ξ' * D[i] * ξ)
+    return real(ξ' * im * D[i] * ξ)
 end
-δi_re = map(Ipml) do i
+δi = map(Ipml) do i
     u = spzeros(N_T)
     u[i] = 1
     return real(u' * ξ)
 end
-δi_im = map(Ipml) do i
-    u = spzeros(ComplexF64, N_T)
-    u[i] = im
-    return real(u' * ξ)
-end
 
-A_set = [Ai_re; Ai_im; Alin_re; Alin_im]
-a_set = [γi_re; γi_im; δi_re; δi_im]
-@constraint(m, c_set[i=1:length(A_set)], LinearAlgebra.tr(LinearAlgebra.Hermitian(A_set[i] * X)) == a_set[i])
+#A_set = [Ai_re; Ai_im; Alin_re; Alin_im]
+#a_set = [γi_re; γi_im; δi_re; δi_im]
+A_set = [Ai_re; Ai_im; Alin]
+a_set = [γi_re; γi_im; δi]
+
+check_constraints = map(eachindex(A_set)) do i
+    trial_constraint = abs(tr(Hermitian(A_set[i] * ([ψ_result; 1] * [ψ_result; 1]')))) - a_set[i]
+    if trial_constraint > 1e-8
+        @show (i, trial_constraint)
+    end
+    return trial_constraint
+end
+#A_set = [Ai; Alin]
+#a_set = [γi; δi]
+@constraint(m, c_set[i=1:length(A_set)], tr(Hermitian(A_set[i] * X)) .== a_set[i])
 # slack variable magnitude == 1
 @constraint(m, X[end, end] == 1)
 
-set_optimizer_attribute(m, "max_iter", 20000)
+set_attribute(m, "time_limit", 5*60.0)
+set_attribute(m, "max_iter", 20000)
 optimize!(m)
 solution_summary(m)
 
@@ -187,3 +219,21 @@ abs2.(only(ψ_result[Im]))
 abs2.(only(ψ1[Im]))
 abs2.(only(ψ1[Im]) - only(ψ_result[Im]))
 # Solve to optimal via majorization-minimization algorithm
+
+γ_hp = 1e-6 # from supplemental
+@objective(m, Max, tr(LinearAlgebra.Hermitian(A0 * X)) + γ_hp * LinearAlgebra.tr(X))
+set_optimizer_attribute(m, "max_iter", 40000)
+optimize!(m)
+solution_summary(m)
+
+ψ_result = svd(value.(X)).U[:, 1][1:end-1]
+lineplot(real(ψ_result))
+design_result = derive_two_level_design((; Lχ1, Lχ2, D, ξ, Id, Ipml, Im), ψ_result)
+
+lineplot(design_result)Lχd = rebuild_design_pde(model, design_result)
+ψ_result = Lχd \ ξ
+lineplot(real(ψ_result))
+
+abs2.(only(ψ_result[Im]))
+abs2.(only(ψ1[Im]))
+abs2.(only(ψ1[Im]) - only(ψ_result[Im]))
