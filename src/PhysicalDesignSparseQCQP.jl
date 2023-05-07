@@ -18,6 +18,7 @@ The `design_domain` is taken to be the entire scattering region
 """
 struct NormalIncidenceFDFD1D
     design_domain
+    buffer_domain
     design_dielectric
     N
     pml
@@ -29,6 +30,10 @@ struct PML
     m
 end
 
+function length_model_grid(model)
+    return model.N + 2*model.pml.N
+end
+
 """
     function build_component_constraints(model)
 
@@ -36,7 +41,7 @@ Builds and returns the sparse matrices which correspond to the model, as used fo
 """
 function build_component_constraints(model)
     Lχ1, Lχ2 = build_design_pdes(model)
-    N_T = model.N + 2model.pml.N
+    N_T = length_model_grid(model)
     ξ = fill(0.0im, N_T)
     D = map(1:N_T) do i
         Di = spzeros(N_T, N_T)
@@ -69,55 +74,44 @@ function derive_two_level_design(design_params, ψ)
 end
 
 function rebuild_design_pde(model, design_binary)
-    pml = model.pml
-    N_T = model.N + 2*pml.N
-    ω = 1.0
-    Δ = model.design_domain / (model.N-1)
-    mw = spdiagm(-1 => fill(1.0/Δ, N_T-1), 0 => fill(-2.0/Δ, N_T), 1 => fill(1.0/Δ, N_T-1))
-    χd = map(1:N_T) do i
-        if i < pml.N
-            return 1.0 - im * pml.σ_max * (pml.N - i)^(pml.m)
-        elseif i >= N_T - pml.N
-            return 1.0 - im * pml.σ_max * (i - N_T - pml.N)^(pml.m)
-        else
-            if design_binary[i] == 1
-                return complex(model.design_dielectric)
-            else
-                return complex(1.0)
-            end
-        end
-    end
-    Lχd = -mw - spdiagm(complex.(χd) * ω^2)
+    mw = mw_op(model)
+    Lχd = mw - dielectric_op(model, design_binary .* model.dielectric)
     return Lχd
 end
 
 function build_design_pdes(model)
+    mw = mw_op(model)
+    Lχ0 = mw - dielectric_op(model, 1.0)
+    Lχd = mw - dielectric_op(model, model.dielectric)
+    return Lχ0, Lχd
+end
+
+function mw_op(model)
     pml = model.pml
-    N_T = model.N + 2*pml.N
-    ω = 1.0
+    N_T = length_model_grid(model)
     Δ = model.design_domain / (model.N-1)
-    mw = spdiagm(-1 => fill(1.0/Δ, N_T-1), 0 => fill(-2.0/Δ, N_T), 1 => fill(1.0/Δ, N_T-1))
-    χ1 = map(1:N_T) do i
-        if i < pml.N
-            return 1.0 - im * pml.σ_max * (pml.N - i)^(pml.m)
-        elseif i >= N_T - pml.N
-            return 1.0 - im * pml.σ_max * (i - N_T - pml.N)^(pml.m)
-        else
-            return 1.0 + 0.0im
-        end
-    end
-    χ2 = map(1:N_T) do i
+    mw = spdiagm(-1 => fill(-1.0/Δ, N_T-1), 0 => fill(2.0/Δ, N_T), 1 => fill(-1.0/Δ, N_T-1))
+    return mw
+end
+
+function dielectric_op(model, dielectric::Number)
+    return dielectric_op(model, fill(dielectric, model.N + 2*model.pml.N))
+end
+
+function dielectric_op(model, dielectric)
+    pml = model.pml
+    N_T = length_model_grid(model)
+    ω = 1.0
+    χ = map(enumerate(dielectric)) do (i, d)
         if i < pml.N
             return 1.0 - im * pml.σ_max * (pml.N - i)^(pml.m)
         elseif i >= N_T - pml.N
             return 1.0 - im * pml.σ_max * (i - N_T + pml.N)^(pml.m)
         else
-            return complex(model.design_dielectric)
+            return complex(d)
         end
     end
-    Lχ1 = -mw - spdiagm(complex.(χ1) * ω^2)
-    Lχ2 = -mw - spdiagm(complex.(χ2) * ω^2)
-    return Lχ1, Lχ2
+    return spdiagm(χ * ω^2)
 end
 
 

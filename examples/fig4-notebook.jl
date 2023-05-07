@@ -45,6 +45,8 @@ The following parameters are taken from §III.
 We make assumptions on the following:
 - PML parameters (number of layers, polynomial grading scheme, and target reflectance)
 - Resolution
+
+Although we are using the reflected phase target from the text, the problem configuration isn't quite compatible. 
 """
 
 # ╔═╡ 9877c619-efaa-4301-b3f7-44ccaa8abb48
@@ -66,13 +68,16 @@ r_target = cis(reflected_phase)
 begin
 	m = 4
 	d = 20
-	R = 9e-1
+	R = 5e-1
 	σmax = -(m+1)*log(R)/(2*d)
 	pml = PML(d, σmax, m)
 end
 
 # ╔═╡ 00a8d627-3fb9-4081-9fbf-e02792fb62cd
 N = design_domain * 40
+
+# ╔═╡ c4bac83c-0ac7-4a11-8394-1de7e53eb091
+N_T = N + 2pml.N
 
 # ╔═╡ f5b0b141-b214-4b79-b267-307c5cffed90
 model = NormalIncidenceFDFD1D(
@@ -108,24 +113,25 @@ end
 
 # ╔═╡ 41349f3e-6261-4c88-990d-df37fbd2e09c
 begin
-	N_T = N + 2pml.N
-	m_ipopt = Model(Ipopt.Optimizer)
-	@variable(m_ipopt, ψ[1:N_T] in ComplexPlane())
-	@constraint(m_ipopt, c[i=Id], ((Lχ1*ψ - ξ)' * D[i] * (Lχ2*ψ - ξ)) == 0)
-	@constraint(m_ipopt, cpml[i=Ipml], (Lχ1*ψ - ξ)' * D[i] * (Lχ1*ψ - ξ) .== 0)
+	m_qcqp = Model(Ipopt.Optimizer)
+	@variable(m_qcqp, ψ[1:N_T] in ComplexPlane())
+	@constraint(m_qcqp, c[i=Id], ((Lχ1*ψ - ξ)' * D[i] * (Lχ2*ψ - ξ)) == 0)
+	@constraint(m_qcqp, cpml[i=Ipml], (Lχ1*ψ - ξ)' * D[i] * (Lχ1*ψ - ξ) .== 0)
 	#@constraint(m, (Lχ1*ψ - ξ)[Ipml, :] .== 0)
 	
-	@objective(m_ipopt, Max, real(ψ[only(Im)]))
+	@objective(m_qcqp, Max, real(ψ[only(Im)]))
 	md"""
 	Here we define the JuMP model for the QCQP which is solved via a local optimizer
+
+	We can then derive the design (we don't obtain it directly) by checking which constraint the field is compatible with at each point in the design domain.
 	"""
 end
 
 # ╔═╡ 661067e0-5f05-410c-9e2b-911610c44e99
 # ╠═╡ show_logs = false
 begin
-	optimize!(m_ipopt)
-	solution_summary(m_ipopt);
+	optimize!(m_qcqp)
+	solution_summary(m_qcqp);
 end
 
 # ╔═╡ 07eeb04a-9360-4229-8bad-e59b281d06d0
@@ -150,7 +156,10 @@ begin
 		
 	β = fill(0.0im, N_T)
 	β[Im] .= 1.0#r_target
-	A0 = Hermitian([fill(0.0im, N_T, N_T) β/2; β'/2 0.0im])
+	Asdp = fill(0.0im, N_T+1, N_T+1)
+	Asdp[Im, Im] .= 1.0
+	#A0 = Hermitian([fill(0.0im, N_T, N_T) β/2; β'/2 0.0im])
+	A0 = Hermitian(Asdp)
 	@objective(m_sdp, Max, tr(Hermitian(A0 * X)))
 
 	Ai_re = map(1:N_T) do i
@@ -224,17 +233,18 @@ end
 # ╟─23b84746-6951-4d4b-b32c-87b9bbdb36f9
 # ╟─cdbe36ff-fd7d-4f87-a8d3-83a3bcd9d98b
 # ╠═44df06fe-a3e6-4a25-8ff3-44be761e0996
-# ╟─08957e59-b5af-497c-80e4-f6e68bc4b5c2
+# ╠═08957e59-b5af-497c-80e4-f6e68bc4b5c2
 # ╟─9877c619-efaa-4301-b3f7-44ccaa8abb48
 # ╟─6815721a-3dc6-438e-9a06-5711d5abf601
 # ╟─e8c27ca8-e4e3-46b1-9eaa-ead1cae1dadf
 # ╟─8ba1e987-c1b1-4e94-a577-bf7bcb08c4bc
 # ╟─8bf1b346-38fb-4d90-b786-58cfe62492d2
-# ╟─720eb905-3eb6-49d7-b825-ad37edecb2d4
-# ╟─00a8d627-3fb9-4081-9fbf-e02792fb62cd
+# ╠═720eb905-3eb6-49d7-b825-ad37edecb2d4
+# ╠═00a8d627-3fb9-4081-9fbf-e02792fb62cd
+# ╠═c4bac83c-0ac7-4a11-8394-1de7e53eb091
 # ╟─f5b0b141-b214-4b79-b267-307c5cffed90
 # ╟─42443748-97e2-49e7-a031-438917261149
-# ╟─347e5b1d-141f-406e-8cfe-d6a59b1f0751
+# ╠═347e5b1d-141f-406e-8cfe-d6a59b1f0751
 # ╠═97ad3034-c16b-47aa-b643-b7b1f48743ce
 # ╠═a83353f8-f0c3-4bb5-b662-1e7c446cfa2e
 # ╠═41349f3e-6261-4c88-990d-df37fbd2e09c
