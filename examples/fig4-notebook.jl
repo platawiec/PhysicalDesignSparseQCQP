@@ -84,7 +84,8 @@ model = NormalIncidenceFDFD1D(
     design_domain,
     design_dielectric,
     N,
-    pml
+    pml,
+	TotalE()
 )
 
 # ╔═╡ 42443748-97e2-49e7-a031-438917261149
@@ -155,11 +156,8 @@ begin
 	@variable(m_sdp, X[1:N_T+1, 1:N_T+1] in HermitianPSDCone())
 		
 	β = fill(0.0im, N_T)
-	β[Im] .= 1.0#r_target
-	Asdp = fill(0.0im, N_T+1, N_T+1)
-	Asdp[Im, Im] .= 1.0
-	#A0 = Hermitian([fill(0.0im, N_T, N_T) β/2; β'/2 0.0im])
-	A0 = Hermitian(Asdp)
+	β[Im] .= r_target
+	A0 = Hermitian([fill(0.0im, N_T, N_T) β/2; β'/2 0.0im])
 	@objective(m_sdp, Max, tr(Hermitian(A0 * X)))
 
 	Ai_re = map(1:N_T) do i
@@ -206,7 +204,6 @@ begin
 end
 
 # ╔═╡ 0ae710f2-3848-4e0d-8567-c40556b64a04
-# ╠═╡ show_logs = false
 begin
 	optimize!(m_sdp)
 	solution_summary(m_sdp)
@@ -216,7 +213,7 @@ end
 begin
 	ψ_sdp = svd(value.(X)).U[:, 1][1:end-1]
 	design_result_sdp = derive_two_level_design((; Lχ1, Lχ2, D, ξ, Id, Ipml, Im), ψ_sdp)
-	Lχd = rebuild_design_pde(model, design_result)
+	Lχd = rebuild_design_pde(model, design_result_sdp)
 	ψ_sdp_rebuilt = Lχd \ ξ
 	p_ψ = plot(real(ψ_sdp), label="Re(E_T) (From SDP)")
 	plot!(p_ψ, real(ψ_sdp_rebuilt), label="Re(E_T) (From SDP Design)")
@@ -238,11 +235,11 @@ end
 # ╟─6815721a-3dc6-438e-9a06-5711d5abf601
 # ╟─e8c27ca8-e4e3-46b1-9eaa-ead1cae1dadf
 # ╟─8ba1e987-c1b1-4e94-a577-bf7bcb08c4bc
-# ╟─8bf1b346-38fb-4d90-b786-58cfe62492d2
+# ╠═8bf1b346-38fb-4d90-b786-58cfe62492d2
 # ╠═720eb905-3eb6-49d7-b825-ad37edecb2d4
 # ╠═00a8d627-3fb9-4081-9fbf-e02792fb62cd
 # ╠═c4bac83c-0ac7-4a11-8394-1de7e53eb091
-# ╟─f5b0b141-b214-4b79-b267-307c5cffed90
+# ╠═f5b0b141-b214-4b79-b267-307c5cffed90
 # ╟─42443748-97e2-49e7-a031-438917261149
 # ╠═347e5b1d-141f-406e-8cfe-d6a59b1f0751
 # ╠═97ad3034-c16b-47aa-b643-b7b1f48743ce
@@ -252,4 +249,4 @@ end
 # ╟─07eeb04a-9360-4229-8bad-e59b281d06d0
 # ╠═2d3cedb5-867d-4934-b0eb-af89870e9805
 # ╠═0ae710f2-3848-4e0d-8567-c40556b64a04
-# ╟─30908df4-a962-489b-bcef-73855e608420
+# ╠═30908df4-a962-489b-bcef-73855e608420
