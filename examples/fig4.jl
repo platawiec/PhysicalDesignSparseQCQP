@@ -21,7 +21,7 @@ r_target = cis(reflected_phase)
 # PML
 
 # Simulation options
-N = design_domain * 40
+N = design_domain * 100
 
 m = 4
 d = 20
@@ -33,18 +33,20 @@ model = NormalIncidenceFDFD1D(
     design_domain,
     design_dielectric,
     N,
-    pml
+    pml,
+    TotalEH()
 )
 
 # quick model test
 Lχ1, Lχ2 = build_design_pdes(model)
-source = fill(0.0im, N + 2pml.N)
+source = fill(0.0im, 2(N + 2pml.N))
 source[pml.N+1] = 1 
+source[pml.N+1+(N+2pml.N)] = im 
 ψ1 = Lχ1 \ source
 ψ2 = Lχ2 \ source
 
-lineplot(real(ψ1))
-lineplot(real(ψ2))
+lineplot(real(ψ1[1:end÷2]))
+lineplot(real(ψ2[1:end÷2]))
 
 ## Define the QCQP
 # Eq. 39
@@ -83,7 +85,7 @@ m = Model(Ipopt.Optimizer)
 @constraint(m, cpml[i=Ipml], (Lχ1*ψ - ξ)' * D[i] * (Lχ1*ψ - ξ) .== 0)
 #@constraint(m, (Lχ1*ψ - ξ)[Ipml, :] .== 0)
 
-@objective(m, Max, real(ψ[only(Im)]))
+@objective(m, Max, real(dot(r_target, ψ[only(Im)])))
 
 # Interlude: attempt solve w/ Ipopt
 optimize!(m)

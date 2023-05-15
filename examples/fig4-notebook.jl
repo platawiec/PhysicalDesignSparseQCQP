@@ -11,7 +11,7 @@ begin
 end
 
 # ╔═╡ 44df06fe-a3e6-4a25-8ff3-44be761e0996
-using PhysicalDesignSparseQCQP, Plots, LinearAlgebra, SparseArrays, JuMP, Ipopt, COSMO
+using PhysicalDesignSparseQCQP, Plots, LinearAlgebra, SparseArrays, JuMP, Ipopt, COSMO, Revise
 
 # ╔═╡ 23b84746-6951-4d4b-b32c-87b9bbdb36f9
 md"""
@@ -46,7 +46,7 @@ We make assumptions on the following:
 - PML parameters (number of layers, polynomial grading scheme, and target reflectance)
 - Resolution
 
-Although we are using the reflected phase target from the text, the problem configuration isn't quite compatible. 
+We set the reflected phase target. The objective function is equivalent to taking the dot product of the solved fied with the target phase - this can be formally derived via Fisher-Lee relation for finite differences.
 """
 
 # ╔═╡ 9877c619-efaa-4301-b3f7-44ccaa8abb48
@@ -67,7 +67,7 @@ r_target = cis(reflected_phase)
 # ╔═╡ 720eb905-3eb6-49d7-b825-ad37edecb2d4
 begin
 	m = 4
-	d = 20
+	d = 8
 	R = 5e-1
 	σmax = -(m+1)*log(R)/(2*d)
 	pml = PML(d, σmax, m)
@@ -163,10 +163,9 @@ begin
 	Ai_re = map(1:N_T) do i
 	    # Lχ1 and Lχ2 have same values at Id and Ipml, don't need if/else
 	    Bi = Lχ1' * D[i] * Lχ2 + (Lχ1' * D[i] * Lχ2)'
-	    # ((Lχ1*ψ - ξ)' * D[i] * (Lχ2*ψ - ξ))
-	    # = ψ' Lχ1' D[i] Lχ2 ψ - ψ' Lχ1' D[i] ξ - ξ' D[i] Lχ2 ψ + ξ' D[i] ξ
+	    # ((Lχ1*ψ - ξ)' * D[i] * (Lχ2*ψ - ξ)) + h.c.
+	    # = ψ' Lχ1' D[i] Lχ2 ψ - ψ' Lχ1' D[i] ξ - ξ' D[i] Lχ2 ψ + ξ' D[i] ξ + h.c.
 	    # = ψ' Bi ψ + Re(vi' ψ)
-	    # = (ψ s)' [Bi vi/2; vi'/2 0] (ψ s) = ψ' Bi ψ + ψ' vi/2 s + s' vi'/2 ψ = ψ' Bi ψ + Re(vi' ψ)
 	    vi = -Lχ2' * D[i] * ξ - Lχ1' * D[i] * ξ
 	    return [Bi/2   vi/2; vi'/2 0.0im]
 	end
@@ -182,10 +181,10 @@ begin
 	end
 	
 	γi_re = map(1:N_T) do i
-	    return real(ξ' * D[i] * ξ)
+	    return -real(ξ' * D[i] * ξ)
 	end
 	γi_im = map(1:N_T) do i
-	    return real(ξ' * im * D[i] * ξ)
+	    return -real(ξ' * im * D[i] * ξ)
 	end
 	δi = map(Ipml) do i
 	    u = spzeros(N_T)
@@ -205,6 +204,7 @@ end
 
 # ╔═╡ 0ae710f2-3848-4e0d-8567-c40556b64a04
 begin
+	set_attribute(m_sdp, "max_iter", 5000)
 	optimize!(m_sdp)
 	solution_summary(m_sdp)
 end
@@ -216,7 +216,7 @@ begin
 	Lχd = rebuild_design_pde(model, design_result_sdp)
 	ψ_sdp_rebuilt = Lχd \ ξ
 	p_ψ = plot(real(ψ_sdp), label="Re(E_T) (From SDP)")
-	plot!(p_ψ, real(ψ_sdp_rebuilt), label="Re(E_T) (From SDP Design)")
+	plot!(p_ψ, real(ψ_sdp_rebuilt), label="Re(E_T) (From SDP Design)", xlims=(1, N_T))
 	
 	plot(
 		heatmap(reshape(design_result_sdp, 1, :), legend=false),
@@ -230,7 +230,7 @@ end
 # ╟─23b84746-6951-4d4b-b32c-87b9bbdb36f9
 # ╟─cdbe36ff-fd7d-4f87-a8d3-83a3bcd9d98b
 # ╠═44df06fe-a3e6-4a25-8ff3-44be761e0996
-# ╠═08957e59-b5af-497c-80e4-f6e68bc4b5c2
+# ╟─08957e59-b5af-497c-80e4-f6e68bc4b5c2
 # ╟─9877c619-efaa-4301-b3f7-44ccaa8abb48
 # ╟─6815721a-3dc6-438e-9a06-5711d5abf601
 # ╟─e8c27ca8-e4e3-46b1-9eaa-ead1cae1dadf
@@ -246,7 +246,7 @@ end
 # ╠═a83353f8-f0c3-4bb5-b662-1e7c446cfa2e
 # ╠═41349f3e-6261-4c88-990d-df37fbd2e09c
 # ╠═661067e0-5f05-410c-9e2b-911610c44e99
-# ╟─07eeb04a-9360-4229-8bad-e59b281d06d0
+# ╠═07eeb04a-9360-4229-8bad-e59b281d06d0
 # ╠═2d3cedb5-867d-4934-b0eb-af89870e9805
 # ╠═0ae710f2-3848-4e0d-8567-c40556b64a04
 # ╠═30908df4-a962-489b-bcef-73855e608420

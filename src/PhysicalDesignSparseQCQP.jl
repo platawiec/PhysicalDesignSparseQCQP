@@ -100,7 +100,7 @@ end
 
 function rebuild_design_pde(model, design_binary)
     mw = mw_op(model)
-    Lχd = mw - dielectric_op(model, design_binary .* model.design_dielectric)
+    Lχd = mw + dielectric_op(model, 1 .+ (design_binary) .* (model.design_dielectric - 1))
     return Lχd
 end
 
